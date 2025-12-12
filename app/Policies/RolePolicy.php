@@ -5,65 +5,63 @@ declare(strict_types=1);
 namespace App\Policies;
 
 use App\Models\Role;
-use Illuminate\Auth\Access\HandlesAuthorization;
 use Illuminate\Foundation\Auth\User as AuthUser;
 
-class RolePolicy
+class RolePolicy extends BasePolicy
 {
-    use HandlesAuthorization;
-
     public function viewAny(AuthUser $authUser): bool
     {
-        return $authUser->can('ViewAny:Role');
+        
+        return $this->checkHierarchicalPermission($authUser, 'ViewAny:Role');
     }
 
     public function view(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('View:Role');
+        return $this->checkHierarchicalPermission($authUser, 'View:Role', $role->team_id);
     }
 
     public function create(AuthUser $authUser): bool
     {
-        return $authUser->can('Create:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Create:Role');
     }
 
     public function update(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('Update:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Update:Role', $role->team_id, true);
     }
 
     public function delete(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('Delete:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Delete:Role', $role->team_id, true);
     }
 
     public function restore(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('Restore:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Restore:Role', $role->team_id, true);
     }
 
     public function forceDelete(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('ForceDelete:Role');
+        return $this->checkHierarchicalPermission($authUser, 'ForceDelete:Role', $role->team_id, true);
     }
 
     public function forceDeleteAny(AuthUser $authUser): bool
     {
-        return $authUser->can('ForceDeleteAny:Role');
+        return $this->checkHierarchicalPermission($authUser, 'ForceDeleteAny:Role');
     }
 
     public function restoreAny(AuthUser $authUser): bool
     {
-        return $authUser->can('RestoreAny:Role');
+        return $this->checkHierarchicalPermission($authUser, 'RestoreAny:Role');
     }
 
     public function replicate(AuthUser $authUser, Role $role): bool
     {
-        return $authUser->can('Replicate:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Replicate:Role', $role->team_id, true);
     }
 
     public function reorder(AuthUser $authUser): bool
     {
-        return $authUser->can('Reorder:Role');
+        return $this->checkHierarchicalPermission($authUser, 'Reorder:Role');
     }
 }

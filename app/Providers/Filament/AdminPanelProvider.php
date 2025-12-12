@@ -2,7 +2,11 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Middleware\SetPermissionsTeamId;
+use App\Models\Access;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -29,6 +33,45 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->tenant(Access::class, ownershipRelationship: 'access')
+            ->tenantMenu(static function (Panel $panel): bool {
+                // Показуємо меню tenant тільки якщо у користувача більше одного доступу
+                $user = $panel->auth()->user();
+
+                return $user?->hasMultipleTenants() ?? false;
+            })
+            ->tenantMenuItems([
+                // Додаємо можливість повернутися на верхній рівень (Main Company)
+                Action::make('backToMain')
+                    ->label('Повернутися до Main')
+                    ->icon('heroicon-o-arrow-left')
+                    ->color('gray')
+                    ->visible(static function (): bool {
+                        $tenant = Filament::getTenant();
+
+                        if ($tenant === null || ! $tenant instanceof Access) {
+                            return false;
+                        }
+
+                        // Показуємо тільки якщо поточний tenant не є Main Company
+                        /** @var \App\Models\User|null $user */
+                        $user = Filament::auth()->user();
+                        $mainCompany = $user?->company();
+
+                        return $mainCompany !== null && $tenant->accessible_id !== $mainCompany->id;
+                    })
+                    ->url(static function (): string {
+                        /** @var \App\Models\User|null $user */
+                        $user = Filament::auth()->user();
+                        $mainAccess = $user?->getDefaultTenant(Filament::getPanel());
+
+                        if ($mainAccess === null) {
+                            return Filament::getPanel()->getUrl();
+                        }
+
+                        return Filament::getPanel()->getUrl($mainAccess);
+                    }),
+            ])
             ->colors([
                 'primary' => Color::Amber,
             ])
@@ -58,6 +101,9 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            ->tenantMiddleware([
+                SetPermissionsTeamId::class,
+            ], isPersistent: true);
     }
 }
