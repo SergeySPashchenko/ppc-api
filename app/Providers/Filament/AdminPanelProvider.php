@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Middleware\ApplyTenantScopes;
 use App\Http\Middleware\SetPermissionsTeamId;
 use App\Models\Access;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -104,6 +105,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->tenantMiddleware([
                 SetPermissionsTeamId::class,
+                ApplyTenantScopes::class,
             ], isPersistent: true);
     }
 }
