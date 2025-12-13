@@ -12,19 +12,18 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('products', function (Blueprint $table) {
-            $table->id('ProductID')->primary();
+            $table->id('ProductID');
             $table->string('Product');
             $table->string('slug');
             $table->boolean('newSystem');
             $table->boolean('Visible');
             $table->boolean('flyer');
-            $table->foreignId('main_category_id')->constrained('categories')->onDelete('set null');
-            $table->foreignId('marketing_category_id')->constrained('categories')->onDelete('set null');
-            $table->foreignId('gender_id')->constrained('genders')->onDelete('set null');
-            $table->foreignId('brand_id')->constrained('brands')->onDelete('set null');
+            $table->foreignId('main_category_id')->constrained('categories', 'category_id')->onDelete('set null');
+            $table->foreignId('marketing_category_id')->constrained('categories', 'category_id')->onDelete('set null');
+            $table->foreignId('gender_id')->constrained('genders', 'gender_id')->onDelete('set null');
+            $table->foreignId('brand_id')->constrained('brands', 'brand_id')->onDelete('set null');
             $table->softDeletes();
             $table->timestamps();
-            $table->index('ProductID');
             $table->index('slug');
         });
     }

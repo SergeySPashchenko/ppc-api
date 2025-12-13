@@ -12,12 +12,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('brands', function (Blueprint $table) {
-            $table->id('brand_id')->primary();
+            $table->id('brand_id');
             $table->string('brand_name');
             $table->string('slug');
             $table->softDeletes();
             $table->timestamps();
-            $table->index('brand_id');
             $table->index('slug');
         });
     }
