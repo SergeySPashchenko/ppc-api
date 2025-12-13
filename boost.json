@@ -1,0 +1,11 @@
+{
+    "agents": [
+        "cursor",
+        "gemini"
+    ],
+    "editors": [
+        "cursor"
+    ],
+    "guidelines": [],
+    "herd_mcp": true
+}
