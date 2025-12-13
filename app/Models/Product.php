@@ -7,6 +7,7 @@ use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Spatie\Sluggable\HasSlug;
@@ -135,4 +136,25 @@ class Product extends Model
     {
         return $this->belongsTo(Gender::class, 'gender_id', 'gender_id');
     }
+
+    /**
+     * @return HasMany<Expense, $this>
+     */
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(Expense::class, 'ProductID', 'ProductID');
+    }
+
+    /**
+     * @return HasMany<ProductItem, $this>
+     */
+    public function productItems(): HasMany
+    {
+        return $this->hasMany(ProductItem::class, 'ProductID', 'ProductID');
+    }
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'ProductID', 'ProductID');
+    }
+
 }

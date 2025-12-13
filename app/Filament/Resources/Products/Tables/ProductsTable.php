@@ -32,11 +32,11 @@ class ProductsTable
                     ->boolean(),
                 IconColumn::make('flyer')
                     ->boolean(),
-                TextColumn::make('mainCategory.category_id')
+                TextColumn::make('mainCategory.category_name')
                     ->searchable(),
-                TextColumn::make('marketingCategory.category_id')
+                TextColumn::make('marketingCategory.category_name')
                     ->searchable(),
-                TextColumn::make('gender.gender_id')
+                TextColumn::make('gender.gender_name')
                     ->searchable(),
                 TextColumn::make('brand.brand_name')
                     ->label('Brand')
