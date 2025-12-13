@@ -20,7 +20,7 @@ final class ExternalRepository
      *
      * @return array<int, array<string, mixed>>
      */
-    public function getExpenses(\DateTimeInterface $from, \DateTimeInterface $to): array
+    public function getExpenses(\DateTimeInterface $from, \DateTimeInterface $to, ?int $limit = null): array
     {
         try {
             return DB::connection(self::CONNECTION)
@@ -31,6 +31,9 @@ final class ExternalRepository
                 ->leftJoin('gender as g', 'p.gender_id', '=', 'g.gender_id')
                 ->leftJoin('expensetype as et', 'et.ExpenseID', '=', 'e.ExpenseID')
                 ->whereBetween('e.ExpenseDate', [$from->format('Y-m-d'), $to->format('Y-m-d')])
+                ->when($limit !== null, fn ($query) => $query->limit($limit))
+                ->orderBy('e.ExpenseDate', 'desc')
+                ->orderBy('e.id', 'desc')
                 ->select([
                     'e.id',
                     'e.ProductID',
@@ -70,7 +73,7 @@ final class ExternalRepository
      *
      * @return array<int, array<string, mixed>>
      */
-    public function getOrders(\DateTimeInterface $from, \DateTimeInterface $to): array
+    public function getOrders(\DateTimeInterface $from, \DateTimeInterface $to, ?int $limit = null): array
     {
         try {
             // Convert dates to Ymd format for external DB comparison
@@ -80,6 +83,9 @@ final class ExternalRepository
             $orders = DB::connection(self::CONNECTION)
                 ->table('Orders')
                 ->whereBetween('OrderDate', [$fromYmd, $toYmd])
+                ->when($limit !== null, fn ($query) => $query->limit($limit))
+                ->orderBy('OrderDate', 'desc')
+                ->orderBy('id', 'desc')
                 ->select([
                     'Orders.id as OrderID',
                     'Orders.Agent',

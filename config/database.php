@@ -75,6 +75,10 @@ return [
             'prefix' => '',
             'strict' => true,
             'engine' => null,
+            'options' => [
+                \PDO::ATTR_TIMEOUT => 5, // Lower connection timeout
+                \PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
+            ],
         ],
 
         'mariadb' => [

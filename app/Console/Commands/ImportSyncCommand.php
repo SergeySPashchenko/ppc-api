@@ -23,8 +23,11 @@ final class ImportSyncCommand extends Command
                             {--from= : Start date for range (Y-m-d format)}
                             {--to= : End date for range (Y-m-d format)}
                             {--last-days= : Import last N days}
+                            {--limit= : Import last N records (by count, not date)}
                             {--only= : Import only specific domain (expenses,orders)}
-                            {--chunk=100 : Number of records to process per chunk}';
+                            {--chunk=100 : Number of records to process per chunk}
+                            {--incremental : Use incremental import (only new/changed records)}
+                            {--optimized : Use optimized import with auto-creation of missing entities}';
 
     /**
      * The console command description.
@@ -43,6 +46,18 @@ final class ImportSyncCommand extends Command
     }
 
     /**
+     * Get optimized services if --optimized flag is set.
+     */
+    private function getOptimizedServices(): array
+    {
+        return [
+            'expense' => app(\App\Services\Import\OptimizedExpenseImportService::class),
+            'order' => app(\App\Services\Import\OptimizedOrderImportService::class),
+            'repository' => app(\App\Services\Import\OptimizedExternalRepository::class),
+        ];
+    }
+
+    /**
      * Execute the console command.
      */
     public function handle(): int
@@ -58,17 +73,31 @@ final class ImportSyncCommand extends Command
 
         $this->info('✓ External database connection successful');
 
-        // Resolve date range
-        [$from, $to] = $this->dateRangeResolver->resolve(
-            $this->option('date'),
-            $this->option('from'),
-            $this->option('to'),
-            $this->option('last-days') ? (int) $this->option('last-days') : null,
-        );
-
-        $this->info(sprintf('Date range: %s', $this->dateRangeResolver->formatRange($from, $to)));
-
         $only = $this->option('only');
+        $limit = $this->option('limit') ? (int) $this->option('limit') : null;
+        $incremental = $this->option('incremental');
+        $optimized = $this->option('optimized');
+
+        // Use optimized mode if flag is set
+        if ($optimized) {
+            return $this->handleOptimizedImport($only, $limit, $incremental);
+        }
+
+        // Legacy mode (backward compatibility)
+        if ($limit === null) {
+            [$from, $to] = $this->dateRangeResolver->resolve(
+                $this->option('date'),
+                $this->option('from'),
+                $this->option('to'),
+                $this->option('last-days') ? (int) $this->option('last-days') : null,
+            );
+            $this->info(sprintf('Date range: %s', $this->dateRangeResolver->formatRange($from, $to)));
+        } else {
+            $to = Carbon::now();
+            $from = $to->copy()->subYears(10);
+            $this->info(sprintf('Importing last %d records (by count, not date)...', $limit));
+        }
+
         $chunkSize = (int) $this->option('chunk');
 
         $totalStats = [
@@ -79,7 +108,7 @@ final class ImportSyncCommand extends Command
         // Import expenses
         if ($only === null || $only === 'expenses') {
             $this->info('Importing expenses...');
-            $expensesStats = $this->importExpenses($from, $to, $chunkSize);
+            $expensesStats = $this->importExpenses($from, $to, $chunkSize, $limit);
             $totalStats['expenses'] = $expensesStats;
             $this->displayStats('Expenses', $expensesStats);
         }
@@ -87,7 +116,7 @@ final class ImportSyncCommand extends Command
         // Import orders
         if ($only === null || $only === 'orders') {
             $this->info('Importing orders...');
-            $ordersStats = $this->importOrders($from, $to, $chunkSize);
+            $ordersStats = $this->importOrders($from, $to, $chunkSize, $limit);
             $totalStats['orders'] = $ordersStats;
             $this->displayStats('Orders', $ordersStats);
         }
@@ -108,9 +137,9 @@ final class ImportSyncCommand extends Command
      *
      * @return array{created: int, updated: int, skipped: int, errors: int}
      */
-    private function importExpenses(Carbon $from, Carbon $to, int $chunkSize): array
+    private function importExpenses(Carbon $from, Carbon $to, int $chunkSize, ?int $limit = null): array
     {
-        $expenses = $this->externalRepository->getExpenses($from, $to);
+        $expenses = $this->externalRepository->getExpenses($from, $to, $limit);
         $total = count($expenses);
 
         if ($total === 0) {
@@ -145,9 +174,9 @@ final class ImportSyncCommand extends Command
      *
      * @return array{created: int, updated: int, skipped: int, errors: int}
      */
-    private function importOrders(Carbon $from, Carbon $to, int $chunkSize): array
+    private function importOrders(Carbon $from, Carbon $to, int $chunkSize, ?int $limit = null): array
     {
-        $orders = $this->externalRepository->getOrders($from, $to);
+        $orders = $this->externalRepository->getOrders($from, $to, $limit);
         $total = count($orders);
 
         if ($total === 0) {
@@ -175,6 +204,84 @@ final class ImportSyncCommand extends Command
         $this->newLine();
 
         return $stats;
+    }
+
+    /**
+     * Handle optimized import mode.
+     */
+    private function handleOptimizedImport(?string $only, ?int $limit, bool $incremental): int
+    {
+        $services = $this->getOptimizedServices();
+        $totalStats = [
+            'expenses' => ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0],
+            'orders' => ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0],
+        ];
+
+        if ($incremental) {
+            $this->info('Using incremental import mode (only new/changed records)...');
+
+            if ($only === null || $only === 'expenses') {
+                $this->info('Importing expenses incrementally...');
+                $stats = $services['expense']->importIncremental();
+                $totalStats['expenses'] = $stats;
+                $this->displayStats('Expenses', $stats);
+            }
+
+            if ($only === null || $only === 'orders') {
+                $this->info('Importing orders incrementally...');
+                $stats = $services['order']->importIncremental();
+                $totalStats['orders'] = $stats;
+                $this->displayStats('Orders', $stats);
+            }
+        } elseif ($limit !== null) {
+            $this->info(sprintf('Importing last %d records (optimized mode)...', $limit));
+
+            if ($only === null || $only === 'expenses') {
+                $this->info('Importing expenses...');
+                $stats = $services['expense']->importLast($limit);
+                $totalStats['expenses'] = $stats;
+                $this->displayStats('Expenses', $stats);
+            }
+
+            if ($only === null || $only === 'orders') {
+                $this->info('Importing orders...');
+                $stats = $services['order']->importLast($limit);
+                $totalStats['orders'] = $stats;
+                $this->displayStats('Orders', $stats);
+            }
+        } else {
+            [$from, $to] = $this->dateRangeResolver->resolve(
+                $this->option('date'),
+                $this->option('from'),
+                $this->option('to'),
+                $this->option('last-days') ? (int) $this->option('last-days') : null,
+            );
+            $this->info(sprintf('Date range: %s (optimized mode)', $this->dateRangeResolver->formatRange($from, $to)));
+
+            if ($only === null || $only === 'expenses') {
+                $this->info('Importing expenses...');
+                $stats = $services['expense']->importByDateRange($from, $to);
+                $totalStats['expenses'] = $stats;
+                $this->displayStats('Expenses', $stats);
+            }
+
+            if ($only === null || $only === 'orders') {
+                $this->info('Importing orders...');
+                $stats = $services['order']->importByDateRange($from, $to);
+                $totalStats['orders'] = $stats;
+                $this->displayStats('Orders', $stats);
+            }
+        }
+
+        // Summary
+        $this->newLine();
+        $this->info('=== Import Summary ===');
+        $this->displayStats('Expenses', $totalStats['expenses']);
+        $this->displayStats('Orders', $totalStats['orders']);
+
+        $this->info('Import completed successfully!');
+
+        return Command::SUCCESS;
     }
 
     /**

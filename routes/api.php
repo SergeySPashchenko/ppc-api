@@ -36,4 +36,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('categories', CategoryController::class)->only(['index', 'show']);
     Route::apiResource('genders', GenderController::class)->only(['index', 'show']);
     Route::apiResource('expense-types', ExpensetypeController::class)->only(['index', 'show']);
+
+    // Import sync routes
+    Route::prefix('import')->group(function () {
+        Route::get('/test-connection', [\App\Http\Controllers\Api\ImportController::class, 'testConnection']);
+        Route::post('/sync', [\App\Http\Controllers\Api\ImportController::class, 'sync']);
+    });
 });
