@@ -16,8 +16,9 @@ class Gender extends Model
     use SoftDeletes;
 
     protected $fillable = [
+        'gender_id',
         'gender_name',
-        'gender_slug',
+        'slug',
     ];
 
     public function getSlugOptions(): SlugOptions

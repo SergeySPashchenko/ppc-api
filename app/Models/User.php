@@ -37,7 +37,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
      */
     protected $fillable = [
         'name',
-        'username',
+        'slug',
         'email',
         'password',
     ];
@@ -69,12 +69,12 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     {
         return SlugOptions::create()
             ->generateSlugsFrom('name')
-            ->saveSlugsTo('username');
+            ->saveSlugsTo('slug');
     }
 
     public function getRouteKeyName(): string
     {
-        return 'username';
+        return 'slug';
     }
 
     /**
@@ -209,7 +209,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     }
 
     /**
-     * Check if user has super-admin or admin role at Main Company.
+     * Check if user has super_admin or admin role at Main Company.
      */
     public function isMainCompanyAdmin(): bool
     {
@@ -230,7 +230,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
 
         // Перевіряємо ролі
         $hasRole = $this->roles()
-            ->whereIn('name', ['super-admin', 'admin'])
+            ->whereIn('name', ['super_admin', 'admin'])
             ->exists();
 
         // Відновлюємо попередній team_id
@@ -243,7 +243,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     }
 
     /**
-     * Check if user has super-admin or admin role at specific team level.
+     * Check if user has super_admin or admin role at specific team level.
      */
     public function isTeamAdmin(?int $teamId): bool
     {
@@ -262,7 +262,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
 
         // Перевіряємо ролі
         $hasRole = $this->roles()
-            ->whereIn('name', ['super-admin', 'admin'])
+            ->whereIn('name', ['super_admin', 'admin'])
             ->exists();
 
         // Відновлюємо попередній team_id

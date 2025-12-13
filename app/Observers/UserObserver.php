@@ -34,9 +34,9 @@ class UserObserver
             'user_id' => $user->id,
         ]);
 
-        // Визначаємо роль: super-admin для superAdmin, guest для інших
+        // Визначаємо роль: super_admin для superAdmin, guest для інших
         $isSuperAdmin = $user->email === 'superadmin@example.com';
-        $roleName = $isSuperAdmin ? 'super-admin' : 'guest';
+        $roleName = $isSuperAdmin ? 'super_admin' : 'guest';
 
         // Створюємо або отримуємо роль з team_id = access->id
         $role = Role::query()->firstOrCreate([

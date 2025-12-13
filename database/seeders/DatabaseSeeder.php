@@ -6,14 +6,12 @@ use App\Models\Access;
 use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\PermissionRegistrar;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
 
     /**
      * Seed the application's database.
@@ -40,10 +38,10 @@ class DatabaseSeeder extends Seeder
             'user_id' => $superAdmin->id,
         ]);
 
-        // Призначаємо роль super-admin для superAdmin через Access (team_id)
+        // Призначаємо роль super_admin для superAdmin через Access (team_id)
         if ($access) {
             $superAdminRole = Role::query()->firstOrCreate([
-                'name' => 'super-admin',
+                'name' => 'super_admin',
                 'guard_name' => 'web',
                 'team_id' => $access->id,
             ]);

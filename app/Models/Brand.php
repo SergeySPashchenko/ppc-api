@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Brand extends Model
 {
@@ -38,4 +39,22 @@ class Brand extends Model
     {
         return $this->morphMany(Access::class, 'accessible');
     }
+
+    /**
+     * Get all users that have access to this brand.
+     *
+     * @return BelongsToMany<User, $this>
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            User::class,
+            'accesses',
+            'accessible_id',
+            'user_id'
+        )->where('accesses.accessible_type', 'brand')
+            ->whereNull('accesses.deleted_at')
+            ->withTimestamps();
+    }
+    
 }
