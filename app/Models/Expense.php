@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AccessibleByUserUniversalTrait;
 use Database\Factories\ExpenseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +13,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 final class Expense extends Model
 {
+    use AccessibleByUserUniversalTrait;
+
+    protected static function boot(): void
+    {
+        parent::boot();
+        self::$cacheAccess = true;
+    }
+
     /** @use HasFactory<ExpenseFactory> */
     use HasFactory;
 
@@ -23,6 +32,14 @@ final class Expense extends Model
         'ExpenseDate',
         'Expense',
     ];
+
+    /**
+     * Назва батьківського відношення для рекурсії доступу
+     */
+    protected function parentRelation(): ?string
+    {
+        return 'product';
+    }
 
     /**
      * @return BelongsTo<Product, $this>

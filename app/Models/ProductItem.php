@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AccessibleByUserUniversalTrait;
 use Database\Factories\ProductItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -17,6 +18,14 @@ use Spatie\Sluggable\SlugOptions;
  */
 final class ProductItem extends Model
 {
+    use AccessibleByUserUniversalTrait;
+
+    protected static function boot(): void
+    {
+        parent::boot();
+        self::$cacheAccess = true;
+    }
+
     /** @use HasFactory<ProductItemFactory> */
     use HasFactory;
 
@@ -50,6 +59,14 @@ final class ProductItem extends Model
     public function getRouteKeyName(): string
     {
         return 'slug';
+    }
+
+    /**
+     * Назва батьківського відношення для рекурсії доступу
+     */
+    protected function parentRelation(): ?string
+    {
+        return 'product';
     }
 
     /**

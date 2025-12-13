@@ -24,7 +24,7 @@ return new class extends Migration
 
             // Foreign keys через ProductID та ExpenseTypeID
             $table->foreign('ProductID')->references('ProductID')->on('products')->onDelete('set null')->onUpdate('cascade');
-            $table->foreign('ExpenseID')->references('ExpenseTypeID')->on('expensetypes')->onDelete('set null')->onUpdate('cascade');
+            $table->foreign('ExpenseID')->references('ExpenseID')->on('expensetypes')->onDelete('set null')->onUpdate('cascade');
         });
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AccessibleByUserUniversalTrait;
 use Database\Factories\OrderFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,10 +15,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 final class Order extends Model
 {
+    use AccessibleByUserUniversalTrait;
+
     /** @use HasFactory<OrderFactory> */
     use HasFactory;
 
     use SoftDeletes;
+
+    protected static function boot(): void
+    {
+        parent::boot();
+        self::$cacheAccess = true;
+    }
 
     protected $fillable = [
         'OrderID',
@@ -32,7 +41,17 @@ final class Order extends Model
         'ShippingMethod',
         'Refund',
         'customer_id',
+        'BrandID',
     ];
+
+    /**
+     * Назва батьківського відношення для рекурсії доступу
+     * Orders inherit access through their associated Product (via BrandID -> ProductID)
+     */
+    protected function parentRelation(): ?string
+    {
+        return 'product';
+    }
 
     /**
      * @return BelongsTo<Customer, $this>
@@ -40,6 +59,15 @@ final class Order extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * @return BelongsTo<Product, $this>
+     *                                   Note: BrandID in orders table references ProductID in products table
+     */
+    public function product(): BelongsTo
+    {
+        return $this->belongsTo(Product::class, 'BrandID', 'ProductID');
     }
 
     /**

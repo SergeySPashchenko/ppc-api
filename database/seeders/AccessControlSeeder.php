@@ -7,6 +7,7 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Gender;
 use App\Models\Product;
+use App\Models\ProductItem;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Role;
@@ -38,7 +39,29 @@ class AccessControlSeeder extends Seeder
                 'gender_id' => $genders->random()->gender_id,
             ]);
             $products = $products->merge($brandProducts);
+
+            // Create product items for each product
+            foreach ($brandProducts as $index => $product) {
+                for ($j = 1; $j <= 2; $j++) {
+                    ProductItem::create([
+                        'ProductID' => $product->ProductID,
+                        'ProductName' => "{$product->Product} - Item {$j}",
+                        'slug' => strtolower("{$product->slug}-item-{$j}"),
+                        'SKU' => "SKU-{$brand->brand_id}-{$product->ProductID}-{$j}",
+                        'Quantity' => rand(10, 100),
+                        'upSell' => $j === 1,
+                        'extraProduct' => $j === 2,
+                        'offerProducts' => null,
+                        'active' => true,
+                        'deleted' => false,
+                    ]);
+                }
+            }
         }
+
+        // Get roles (created by PermissionSeeder)
+        $brandAdminRole = Role::firstOrCreate(['name' => 'brand_admin', 'guard_name' => 'web']);
+        $productManagerRole = Role::firstOrCreate(['name' => 'product_manager', 'guard_name' => 'web']);
 
         // Create users with different access levels
 
@@ -54,10 +77,11 @@ class AccessControlSeeder extends Seeder
             'name' => 'Brand User',
             'email' => 'brand@example.com',
         ]);
+        $brandUser->assignRole($brandAdminRole);
         $brand1 = $brands->first();
         Access::create([
             'user_id' => $brandUser->id,
-            'accessible_type' => Brand::class,
+            'accessible_type' => Brand::getMorphType(),
             'accessible_id' => $brand1->brand_id,
             'level' => 1,
         ]);
@@ -67,17 +91,18 @@ class AccessControlSeeder extends Seeder
             'name' => 'Product User',
             'email' => 'product@example.com',
         ]);
+        $productUser->assignRole($productManagerRole);
         $product1 = $products->first();
         $product2 = $products->skip(1)->first();
         Access::create([
             'user_id' => $productUser->id,
-            'accessible_type' => Product::class,
+            'accessible_type' => Product::getMorphType(),
             'accessible_id' => $product1->ProductID,
             'level' => 1,
         ]);
         Access::create([
             'user_id' => $productUser->id,
-            'accessible_type' => Product::class,
+            'accessible_type' => Product::getMorphType(),
             'accessible_id' => $product2->ProductID,
             'level' => 1,
         ]);
@@ -87,17 +112,18 @@ class AccessControlSeeder extends Seeder
             'name' => 'Multi Brand User',
             'email' => 'multibrand@example.com',
         ]);
+        $multiBrandUser->assignRole($brandAdminRole);
         $brand2 = $brands->skip(1)->first();
         $brand3 = $brands->skip(2)->first();
         Access::create([
             'user_id' => $multiBrandUser->id,
-            'accessible_type' => Brand::class,
+            'accessible_type' => Brand::getMorphType(),
             'accessible_id' => $brand2->brand_id,
             'level' => 1,
         ]);
         Access::create([
             'user_id' => $multiBrandUser->id,
-            'accessible_type' => Brand::class,
+            'accessible_type' => Brand::getMorphType(),
             'accessible_id' => $brand3->brand_id,
             'level' => 1,
         ]);
@@ -107,17 +133,18 @@ class AccessControlSeeder extends Seeder
             'name' => 'Mixed Access User',
             'email' => 'mixed@example.com',
         ]);
+        $mixedUser->assignRole($brandAdminRole);
         $brand4 = $brands->skip(3)->first();
         $productFromOtherBrand = $products->where('brand_id', '!=', $brand4->brand_id)->first();
         Access::create([
             'user_id' => $mixedUser->id,
-            'accessible_type' => Brand::class,
+            'accessible_type' => Brand::getMorphType(),
             'accessible_id' => $brand4->brand_id,
             'level' => 1,
         ]);
         Access::create([
             'user_id' => $mixedUser->id,
-            'accessible_type' => Product::class,
+            'accessible_type' => Product::getMorphType(),
             'accessible_id' => $productFromOtherBrand->ProductID,
             'level' => 1,
         ]);

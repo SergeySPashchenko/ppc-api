@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\AccessibleByUserTrait;
+use App\Models\Concerns\AccessibleByUserUniversalTrait;
 use Filament\Models\Contracts\HasCurrentTenantLabel;
 use Filament\Models\Contracts\HasName;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,7 +14,13 @@ use Spatie\Sluggable\SlugOptions;
 
 class Brand extends Model implements HasCurrentTenantLabel, HasName
 {
-    use AccessibleByUserTrait;
+    use AccessibleByUserUniversalTrait;
+
+    protected static function boot(): void
+    {
+        parent::boot();
+        static::$cacheAccess = true;
+    }
 
     /** @use HasFactory<\Database\Factories\BrandFactory> */
     use HasFactory;

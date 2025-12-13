@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Access;
 use App\Models\Brand;
 use App\Models\Product;
+use App\Models\ProductItem;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -27,6 +28,7 @@ class AccessService
     protected array $cachedModels = [
         Brand::class,
         Product::class,
+        ProductItem::class,
     ];
 
     /**
@@ -99,6 +101,37 @@ class AccessService
             }
         }
 
+        // ProductItems inherit access from Products (and through Products from Brands)
+        if ($modelClass === ProductItem::class) {
+            // Get products user has direct access to
+            $productIds = Access::query()
+                ->where('user_id', $user->id)
+                ->where('accessible_type', Product::getMorphType())
+                ->pluck('accessible_id');
+
+            // Get products accessible through brands
+            $brandIds = Access::query()
+                ->where('user_id', $user->id)
+                ->where('accessible_type', Brand::getMorphType())
+                ->pluck('accessible_id');
+
+            $allProductIds = $productIds->toBase();
+            if ($brandIds->isNotEmpty()) {
+                $brandProductIds = Product::query()
+                    ->whereIn('brand_id', $brandIds)
+                    ->pluck('ProductID');
+                $allProductIds = $allProductIds->merge($brandProductIds);
+            }
+
+            if ($allProductIds->isNotEmpty()) {
+                // Get all product items for accessible products
+                $itemIds = ProductItem::query()
+                    ->whereIn('ProductID', $allProductIds)
+                    ->pluck('ItemID');
+                $inheritedIds = $inheritedIds->merge($itemIds);
+            }
+        }
+
         return $inheritedIds->values();
     }
 
@@ -142,9 +175,14 @@ class AccessService
         if ($user && $modelClass) {
             Cache::forget($this->getCacheKey($user, $modelClass));
 
-            // If brand access changed, also clear product cache (products inherit from brands)
+            // If brand access changed, also clear product and product item cache
             if ($modelClass === Brand::class) {
                 Cache::forget($this->getCacheKey($user, Product::class));
+                Cache::forget($this->getCacheKey($user, ProductItem::class));
+            }
+            // If product access changed, also clear product item cache
+            if ($modelClass === Product::class) {
+                Cache::forget($this->getCacheKey($user, ProductItem::class));
             }
         } elseif ($user) {
             // Clear all caches for this user

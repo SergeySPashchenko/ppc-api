@@ -1,45 +1,258 @@
-Goal: Implement multi-level access control in Filament with “All view” for users and brand/product filtering.
+Universal Hierarchical Access System with Filament Tenancy (Analysis → Improve → Implement → Verify)
+🔴 IMPORTANT
+
+DO NOT start coding immediately.
+Follow phases strictly in order.
+
+🟢 PHASE 1 — Concept & Architecture Review
+1. Analyze the following concept as a system, not just code
+
+System requirements summary:
+
+There is NO real tenant isolation
+
+There is ONE global “All” view (always available)
+
+Brand switcher is ONLY a filter, not a tenant
+
+Access is hierarchical and inherited
+
+Access can be granted at any level
+
+Future levels must not require schema changes
+
+Filament tenancy is used only for UI filtering, not for data isolation
+
+You MUST:
+
+Validate whether the proposed model scales
+
+Identify logical conflicts or edge cases
+
+Propose improvements ONLY if they do not break the concept
+
+Explicitly explain why each change is needed
+
+❗If something is fine — say so.
+❗If something is wrong — explain why and how to fix.
+
+🟢 PHASE 2 — Finalize Architecture (no code yet)
+
+Produce a final agreed architecture including:
+
+A. Access model
+
+Structure of accesses table
+
+Meaning of accessible_type, accessible_id
+
+How inheritance works
+
+How “All” is computed
+
+B. Visibility rules
+
+Which resources user sees depending on access level
+
+What global admins see
+
+What guests see
+
+C. Filament usage
+
+How Filament tenancy will be used
+
+How “All” differs from brand filter
+
+How tenant switcher behaves
+
+⚠️ No code in this phase — only explanation.
+
+🟢 PHASE 3 — Code Analysis (existing code)
+
+Analyze existing codebase:
+
+Current AccessibleByUserRecursiveUniversal trait
+
+getMorphType() logic
+
+Access queries
+
+Existing Filament configuration
+
+Current tenant / team / company logic (if any)
+
+You MUST:
+
+Identify what can be reused
+
+Identify what must be removed
+
+Identify what must be refactored
+
+Identify performance risks
+
+🟢 PHASE 4 — Implementation
+4.1 Universal Access Trait
+
+Implement ONE universal trait that:
+
+Supports unlimited hierarchy depth
+
+Uses parentRelation() recursion
+
+Uses accessible_type (no instanceof)
+
+Supports optional caching per model
+
+Supports:
+
+Model::accessibleByUser($user);        // All
+Model::accessibleByUser($user, $id);   // Filter
+
+
+❗Trait must be reusable without modification.
+
+4.2 Filament Integration (CRITICAL)
+
+Use Filament v4 tenancy API
+👉 https://filamentphp.com/docs/4.x/users/tenancy
 
 Requirements:
 
-Main screen: All accessible resources are visible regardless of level (Brand, Product, ProductItem, etc.).
+“All” is NOT a tenant
 
-Sub-screens: Show only resources for the selected brand/product. If a user has access to all items under one brand, no sub-screen needed, only “All”.
+Tenants = Brands (only for filtering)
 
-Global admins: Can see everything, can switch brands, “All Brands” always accessible.
+Tenant switcher:
 
-Roles & access:
+Hidden if user has access to only one brand
 
-Users may have access to a brand, specific products, or lower-level items.
+Visible if user has access to multiple brands
 
-Access is inherited unless explicitly restricted.
+Switching tenant MUST:
 
-If a user has edit rights at product level, they can edit product items unless restricted.
+Filter data
 
-Caching: Cache accessible IDs per user and model. Allow toggling cache per model.
+NOT change access rules
 
-Reusable logic:
+NOT break policies
 
-Use AccessibleByUserTrait (or similar) with recursive parent relation support.
+You MUST:
 
-Each model defines public static function getMorphType(): string.
+Use getTenants()
 
-Filament integration: Apply tenancy using Filament 4.x API for users and teams.
+Use tenant() config properly
 
-Data: Generate fake data to verify multi-level access and “All view” behavior.
+Override ownership relationship if needed
 
-Optimization: Avoid loading unnecessary records, support filtering by brand or product dynamically.
+Ensure no error like:
 
-Tasks for Cursor:
+model does not have relationship named [access]
 
-Analyze plan, suggest improvements if needed.
+4.3 Resource filtering
 
-Update models & traits with recursive, cached access.
+All Filament Resources must:
 
-Integrate with Filament tenancy API.
+Use accessibleByUser() scope
 
-Create fake data for testing.
+Respect current tenant (brand filter)
 
-Verify that main screen shows “All accessible resources” and sub-screens filter correctly.
+Work correctly in:
 
-Ensure global admins have full visibility and can switch brands.
+All
+
+Brand A
+
+Brand B
+
+🟢 PHASE 5 — Seeders & Fake Data
+
+Create seeders that generate:
+
+Users
+
+Global admin
+
+Brand admin
+
+Product-level user
+
+Product-item-level user
+
+Guest
+
+Data
+
+3 brands
+
+Multiple products per brand
+
+Product items per product
+
+Access cases
+
+Mixed access across brands
+
+Access only to items
+
+Access only to products
+
+Access to full brand
+
+🟢 PHASE 6 — Verification
+
+Write a manual verification checklist and validate:
+
+✔ All users see “All”
+✔ Data visibility matches access
+✔ Brand switcher only filters
+✔ No data leaks
+✔ Global admin sees everything
+✔ Guest sees only allowed globals
+✔ No N+1 or recursive explosion
+✔ Cache invalidates correctly
+
+🟢 PHASE 7 — Final Report
+
+Provide:
+
+Final architecture summary
+
+Key decisions & reasoning
+
+Performance considerations
+
+Future extensions:
+
+deny rules
+
+role-level overrides
+
+more hierarchy levels
+
+🚫 ABSOLUTELY FORBIDDEN
+
+❌ tenant = access
+❌ team_id based logic
+❌ company ownership model
+❌ hardcoded instanceof
+❌ schema changes for new levels
+❌ duplicating logic per model
+
+🏁 SUCCESS CRITERIA
+
+The system must:
+
+Feel simple in UI
+
+Be powerful in access control
+
+Be future-proof
+
+Be understandable by another senior dev
+
+🧠 Reminder to Cursor
+
+This is not CRUD.
+This is authorization architecture.

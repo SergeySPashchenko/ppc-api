@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\AccessibleByUserUniversalTrait;
 use Database\Factories\AddressFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -13,6 +14,23 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 final class Address extends Model
 {
+    use AccessibleByUserUniversalTrait;
+
+    protected static function boot(): void
+    {
+        parent::boot();
+        self::$cacheAccess = true;
+    }
+
+    /**
+     * Address access is determined through customer or orders.
+     * An address is accessible if user has access to the customer or any order using it.
+     */
+    protected function parentRelation(): ?string
+    {
+        return 'customer'; // Inherit access through customer
+    }
+
     /** @use HasFactory<AddressFactory> */
     use HasFactory;
 

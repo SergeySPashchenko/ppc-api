@@ -77,17 +77,7 @@ class ProductResource extends Resource
 
         // Apply access filtering for non-global admins
         if (Auth::check() && ! Auth::user()->isGlobalAdmin()) {
-            $user = Auth::user();
-
-            // Get accessible product IDs (includes inherited from brands)
-            $accessibleIds = app(\App\Services\AccessService::class)->getAccessibleIds($user, Product::class);
-
-            if ($accessibleIds->isEmpty()) {
-                return $query->whereRaw('1 = 0'); // No access
-            }
-
-            // Apply access scope
-            $query->whereIn('ProductID', $accessibleIds);
+            $query->accessibleBy(Auth::user());
         }
 
         return $query;
