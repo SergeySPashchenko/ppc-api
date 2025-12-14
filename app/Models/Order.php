@@ -34,14 +34,22 @@ final class Order extends Model
         'Created',
         'OrderDate',
         'OrderNum',
+        'OrderN',
         'ProductTotal',
         'GrandTotal',
         'RefundAmount',
+        'refund_amount_raw',
+        'refund_amount_is_valid',
         'Shipping',
         'ShippingMethod',
         'Refund',
+        'refund_type',
+        'is_refunded',
+        'is_partial_refund',
         'customer_id',
         'BrandID',
+        'is_marketplace',
+        'has_missing_contact_info',
     ];
 
     /**
@@ -96,6 +104,11 @@ final class Order extends Model
             'GrandTotal' => 'decimal:2',
             'RefundAmount' => 'decimal:2',
             'Refund' => 'boolean',
+            'refund_amount_is_valid' => 'boolean',
+            'is_refunded' => 'boolean',
+            'is_partial_refund' => 'boolean',
+            'is_marketplace' => 'boolean',
+            'has_missing_contact_info' => 'boolean',
         ];
     }
 }

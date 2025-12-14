@@ -179,6 +179,7 @@ final class OptimizedExternalRepository
 
         $query = DB::connection(self::CONNECTION)
             ->table('Orders')
+            ->leftJoin('product', 'product.ProductID', '=', 'Orders.BrandID')
             ->select([
                 'Orders.id as OrderID',
                 'Orders.Agent',
@@ -210,6 +211,8 @@ final class OptimizedExternalRepository
                 'Orders.ShipZip as ShippingZip',
                 'Orders.ShipCountry as ShippingCountry',
                 'Orders.ShipPhone as ShippingPhone',
+                'product.Product as ProductName',
+                'product.Brand as ProductBrand',
             ])
             ->orderBy('Orders.OrderDate', 'asc')
             ->orderBy('Orders.id', 'asc');
@@ -276,6 +279,7 @@ final class OptimizedExternalRepository
 
             DB::connection(self::CONNECTION)
                 ->table('Orders')
+                ->leftJoin('product', 'product.ProductID', '=', 'Orders.BrandID')
                 ->whereBetween('OrderDate', [$dayStartYmd, $dayEndYmd])
                 ->select([
                     'Orders.id as OrderID',
@@ -308,6 +312,8 @@ final class OptimizedExternalRepository
                     'Orders.ShipZip as ShippingZip',
                     'Orders.ShipCountry as ShippingCountry',
                     'Orders.ShipPhone as ShippingPhone',
+                    'product.Product as ProductName',
+                    'product.Brand as ProductBrand',
                 ])
                 ->orderBy('Orders.OrderDate', 'asc')
                 ->orderBy('Orders.id', 'asc')
@@ -343,6 +349,7 @@ final class OptimizedExternalRepository
     {
         $orders = DB::connection(self::CONNECTION)
             ->table('Orders')
+            ->leftJoin('product', 'product.ProductID', '=', 'Orders.BrandID')
             ->select([
                 'Orders.id as OrderID',
                 'Orders.Agent',
@@ -374,6 +381,8 @@ final class OptimizedExternalRepository
                 'Orders.ShipZip as ShippingZip',
                 'Orders.ShipCountry as ShippingCountry',
                 'Orders.ShipPhone as ShippingPhone',
+                'product.Product as ProductName',
+                'product.Brand as ProductBrand',
             ])
             ->orderBy('Orders.OrderDate', 'desc')
             ->orderBy('Orders.id', 'desc')
@@ -393,6 +402,7 @@ final class OptimizedExternalRepository
 
     /**
      * Attach order items to orders array (batch load to avoid N+1).
+     * Optimized for large datasets by processing in chunks.
      *
      * @param  array<int, array<string, mixed>>  $orders
      * @param  array<int>  $orderIds
@@ -403,53 +413,74 @@ final class OptimizedExternalRepository
             return;
         }
 
-        $orderItems = DB::connection(self::CONNECTION)
-            ->table('OrderItems')
-            ->leftJoin('ProductItem', 'ProductItem.ItemID', '=', 'OrderItems.ItemID')
-            ->whereIn('OrderItems.OrderID', $orderIds)
-            ->select([
-                'OrderItems.idOrderItem',
-                'OrderItems.OrderID',
-                'OrderItems.ItemID',
-                'OrderItems.Price',
-                'OrderItems.Qty',
-            ])
-            ->get()
-            ->groupBy('OrderID')
-            ->map(fn ($items) => $items->map(fn ($item) => (array) $item)->toArray())
-            ->toArray();
+        // Process in chunks to avoid large WHERE IN clauses
+        $chunkSize = 100;
+        $allOrderItems = [];
+
+        foreach (array_chunk($orderIds, $chunkSize) as $chunkIds) {
+            $orderItems = DB::connection(self::CONNECTION)
+                ->table('OrderItems')
+                ->leftJoin('ProductItem', 'ProductItem.ItemID', '=', 'OrderItems.ItemID')
+                ->whereIn('OrderItems.OrderID', $chunkIds)
+                ->select([
+                    'OrderItems.idOrderItem',
+                    'OrderItems.OrderID',
+                    'OrderItems.ItemID',
+                    'OrderItems.Price',
+                    'OrderItems.Qty',
+                ])
+                ->get()
+                ->groupBy('OrderID')
+                ->map(fn ($items) => $items->map(fn ($item) => (array) $item)->toArray())
+                ->toArray();
+
+            $allOrderItems = array_merge($allOrderItems, $orderItems);
+        }
 
         foreach ($orders as &$order) {
-            $order['items'] = $orderItems[$order['OrderID']] ?? [];
+            $order['items'] = $allOrderItems[$order['OrderID']] ?? [];
         }
     }
 
     /**
      * Attach order items to orders array.
+     * Optimized for large datasets by processing in chunks.
      *
      * @param  array<int, array<string, mixed>>  $orders
      * @param  array<int>  $orderIds
      */
     private function attachOrderItemsToOrders(array &$orders, array $orderIds): void
     {
-        $orderItems = DB::connection(self::CONNECTION)
-            ->table('OrderItems')
-            ->leftJoin('ProductItem', 'ProductItem.ItemID', '=', 'OrderItems.ItemID')
-            ->whereIn('OrderItems.OrderID', $orderIds)
-            ->select([
-                'OrderItems.idOrderItem',
-                'OrderItems.OrderID',
-                'OrderItems.ItemID',
-                'OrderItems.Price',
-                'OrderItems.Qty',
-            ])
-            ->get()
-            ->groupBy('OrderID')
-            ->map(fn ($items) => $items->map(fn ($item) => (array) $item)->toArray())
-            ->toArray();
+        if (empty($orderIds)) {
+            return;
+        }
+
+        // Process in chunks to avoid large WHERE IN clauses
+        $chunkSize = 100;
+        $allOrderItems = [];
+
+        foreach (array_chunk($orderIds, $chunkSize) as $chunkIds) {
+            $orderItems = DB::connection(self::CONNECTION)
+                ->table('OrderItems')
+                ->leftJoin('ProductItem', 'ProductItem.ItemID', '=', 'OrderItems.ItemID')
+                ->whereIn('OrderItems.OrderID', $chunkIds)
+                ->select([
+                    'OrderItems.idOrderItem',
+                    'OrderItems.OrderID',
+                    'OrderItems.ItemID',
+                    'OrderItems.Price',
+                    'OrderItems.Qty',
+                ])
+                ->get()
+                ->groupBy('OrderID')
+                ->map(fn ($items) => $items->map(fn ($item) => (array) $item)->toArray())
+                ->toArray();
+
+            $allOrderItems = array_merge($allOrderItems, $orderItems);
+        }
 
         foreach ($orders as &$order) {
-            $order['items'] = $orderItems[$order['OrderID']] ?? [];
+            $order['items'] = $allOrderItems[$order['OrderID']] ?? [];
         }
     }
 

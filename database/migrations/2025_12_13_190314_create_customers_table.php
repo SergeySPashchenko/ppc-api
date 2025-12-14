@@ -15,14 +15,16 @@ return new class extends Migration
     {
         Schema::create('customers', function (Blueprint $table): void {
             $table->id();
-
             $table->string('email')->nullable();
-
             $table->string('name')->nullable();
-
             $table->string('phone')->nullable();
+            $table->boolean('is_anonymous')->default(false);
             $table->timestamps();
             $table->softDeletes();
+
+            // Indexes and constraints
+            $table->index('email');
+            $table->unique('email', 'customers_email_unique');
         });
     }
 

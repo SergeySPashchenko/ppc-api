@@ -21,8 +21,21 @@ return new class extends Migration
             $table->foreign('ItemID')->references('ItemID')->on('product_items')->onDelete('set null')->onUpdate('cascade');
             $table->decimal('Price', 10, 2);
             $table->integer('Qty');
+            $table->decimal('line_total', 12, 2)->default(0);
+            $table->boolean('is_valid')->default(true);
+            $table->decimal('price_raw', 12, 2)->nullable();
+            $table->integer('qty_raw')->nullable();
+            $table->text('validation_errors')->nullable();
             $table->softDeletes();
             $table->timestamps();
+
+            // Indexes and constraints
+            $table->index('OrderID');
+            $table->index('ItemID');
+            $table->unique(['OrderID', 'ItemID'], 'order_items_order_item_unique');
+            $table->index('line_total', 'order_items_line_total_index');
+            $table->index('is_valid', 'order_items_is_valid_index');
+            $table->index(['OrderID', 'is_valid'], 'order_items_order_valid_index');
         });
     }
 

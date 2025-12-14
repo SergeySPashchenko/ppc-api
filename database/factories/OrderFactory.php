@@ -17,7 +17,19 @@ class OrderFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'OrderID' => fake()->unique()->numberBetween(1000, 999999),
+            'Agent' => fake()->name(),
+            'Created' => fake()->dateTime(),
+            'OrderDate' => fake()->date(),
+            'OrderNum' => fake()->unique()->bothify('ORD-####-???'),
+            'ProductTotal' => fake()->randomFloat(2, 10, 1000),
+            'GrandTotal' => fake()->randomFloat(2, 10, 1000),
+            'RefundAmount' => 0,
+            'Shipping' => null,
+            'ShippingMethod' => null,
+            'Refund' => false,
+            'is_marketplace' => false,
+            'has_missing_contact_info' => false,
         ];
     }
 }

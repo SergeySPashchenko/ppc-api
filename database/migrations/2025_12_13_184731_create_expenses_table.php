@@ -25,6 +25,11 @@ return new class extends Migration
             // Foreign keys через ProductID та ExpenseTypeID
             $table->foreign('ProductID')->references('ProductID')->on('products')->onDelete('set null')->onUpdate('cascade');
             $table->foreign('ExpenseID')->references('ExpenseID')->on('expensetypes')->onDelete('set null')->onUpdate('cascade');
+
+            // Indexes and constraints
+            $table->index('ExpenseDate');
+            $table->index('ProductID');
+            $table->unique(['ExpenseDate', 'ProductID', 'ExpenseID'], 'expenses_date_product_type_unique');
         });
     }
 

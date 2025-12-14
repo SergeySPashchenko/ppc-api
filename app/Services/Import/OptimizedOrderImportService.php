@@ -147,6 +147,7 @@ final class OptimizedOrderImportService
 
     /**
      * Import last N orders.
+     * Optimized for large datasets by processing in chunks.
      *
      * @return array{created: int, updated: int, skipped: int, errors: int}
      */
@@ -156,19 +157,40 @@ final class OptimizedOrderImportService
         $repository = app(OptimizedExternalRepository::class);
         $orders = $repository->getLastOrders($limit);
 
-        foreach ($orders as $orderData) {
-            try {
-                DB::beginTransaction();
-                $result = $this->importSingleOrder($orderData);
-                $stats[$result]++;
-                DB::commit();
-            } catch (\Exception $e) {
-                DB::rollBack();
-                $stats['errors']++;
-                Log::error('Failed to import order', [
-                    'OrderID' => $orderData['OrderID'] ?? null,
-                    'error' => $e->getMessage(),
-                ]);
+        // Process in chunks to reduce memory usage and database load
+        $chunkSize = 50;
+        $processed = 0;
+
+        foreach (array_chunk($orders, $chunkSize) as $chunk) {
+            foreach ($chunk as $orderData) {
+                try {
+                    DB::beginTransaction();
+                    $result = $this->importSingleOrder($orderData);
+                    $stats[$result]++;
+                    DB::commit();
+                    $processed++;
+
+                    // Log progress every 50 records
+                    if ($processed % 50 === 0) {
+                        Log::info('Import progress', [
+                            'processed' => $processed,
+                            'total' => $limit,
+                            'stats' => $stats,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    $stats['errors']++;
+                    Log::error('Failed to import order', [
+                        'OrderID' => $orderData['OrderID'] ?? null,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Small delay between chunks to reduce database load
+            if (count($chunk) === $chunkSize) {
+                usleep(100000); // 0.1 second delay
             }
         }
 
@@ -192,34 +214,77 @@ final class OptimizedOrderImportService
         // Sync Product (create if missing) - use BrandID from order
         $brandId = $orderData['BrandID'] ?? null;
         if ($brandId !== null) {
-            $product = $this->productService->syncProduct([
-                'ProductID' => $brandId,
-                'Brand' => null, // Brand will be synced from product data if needed
-            ]);
-
-            if ($product === null) {
-                Log::warning('Failed to sync product for order', [
-                    'OrderID' => $externalOrderId,
-                    'BrandID' => $brandId,
+            try {
+                $product = $this->productService->syncProduct([
+                    'ProductID' => $brandId,
+                    'Product' => $orderData['ProductName'] ?? null,
+                    'Brand' => $orderData['ProductBrand'] ?? null,
                 ]);
 
-                return 'skipped';
+                // In optimized mode, syncProduct should always create product if missing
+                // If it returns null, something went wrong
+                if ($product === null) {
+                    Log::error('Failed to sync product for order - syncProduct returned null', [
+                        'OrderID' => $externalOrderId,
+                        'BrandID' => $brandId,
+                    ]);
+                    // Don't skip - continue with order import even if product sync failed
+                    // The order will have BrandID set, and product can be created later
+                }
+            } catch (\Exception $e) {
+                Log::error('Exception syncing product for order', [
+                    'OrderID' => $externalOrderId,
+                    'BrandID' => $brandId,
+                    'error' => $e->getMessage(),
+                ]);
+                // Don't skip - continue with order import even if product sync failed
+                // The order will have BrandID set, and product can be created later
             }
         }
 
         // Import customer
         $customer = $this->customerService->importFromOrder($orderData);
 
-        // Find or create order
-        $order = Order::query()
+        // Find or create order - use DB query first to avoid Eloquent scope issues
+        $orderId = DB::table('orders')
             ->where('OrderID', $externalOrderId)
-            ->first();
+            ->value('id');
 
-        $isNew = $order === null;
+        $isNew = $orderId === null;
 
         if ($isNew) {
-            $order = $this->createOrder($orderData, $customer);
-        } else {
+            try {
+                $order = $this->createOrder($orderData, $customer);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // If order was created concurrently, try to find it
+                if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'UNIQUE constraint')) {
+                    $orderId = DB::table('orders')
+                        ->where('OrderID', $externalOrderId)
+                        ->value('id');
+                    if ($orderId !== null) {
+                        $order = Order::find($orderId);
+                        $isNew = false;
+                    } else {
+                        throw $e;
+                    }
+                } else {
+                    throw $e;
+                }
+            }
+        }
+
+        if (! $isNew) {
+            if (! isset($order)) {
+                // Use withoutGlobalScopes to avoid any scope filtering
+                $order = Order::withoutGlobalScopes()->find($orderId);
+            }
+            if ($order === null) {
+                Log::error('Order not found after ID lookup', [
+                    'OrderID' => $externalOrderId,
+                    'order_id' => $orderId,
+                ]);
+                throw new \RuntimeException("Order with OrderID {$externalOrderId} not found");
+            }
             $updated = $this->updateOrderIfChanged($order, $orderData, $customer);
             if (! $updated) {
                 return 'skipped';
@@ -248,18 +313,60 @@ final class OptimizedOrderImportService
         $orderDate = $this->parseOrderDate($orderData['OrderDate'] ?? null);
         $created = $this->parseDateTime($orderData['Created'] ?? null);
 
+        // Determine if this is a marketplace/FBA order
+        $isMarketplace = $this->isMarketplaceOrder($orderData);
+
+        // Determine if contact info is missing
+        $hasMissingContactInfo = $this->hasMissingContactInfo($orderData);
+
+        $productTotal = $this->normalizeDecimal($orderData['ProductTotal'] ?? 0);
+        $grandTotal = $this->normalizeDecimal($orderData['GrandTotal'] ?? 0);
+
+        // Store original RefundAmount before normalization
+        $refundAmountRaw = $orderData['RefundAmount'] ?? null;
+        $refundAmount = $this->normalizeDecimal($refundAmountRaw ?? 0);
+
+        // Validate RefundAmount
+        $refundAmountIsValid = $this->isValidRefundAmount($refundAmountRaw);
+
+        // Store original Refund type (can be string like "*Cancelled", "*Refund", etc.)
+        $refundType = is_string($orderData['Refund'] ?? null) ? $orderData['Refund'] : null;
+        $refund = (bool) ($orderData['Refund'] ?? false);
+
+        // Calculate refund flags
+        $isRefunded = (float) $refundAmount > 0;
+        $isPartialRefund = $isRefunded && (float) $refundAmount < (float) $grandTotal && (float) $grandTotal > 0;
+
+        Log::debug('Creating order with normalized values', [
+            'OrderID' => $orderData['OrderID'],
+            'ProductTotal' => $productTotal,
+            'GrandTotal' => $grandTotal,
+            'RefundAmount' => $refundAmount,
+            'ProductTotal_raw' => $orderData['ProductTotal'] ?? 'not set',
+            'GrandTotal_raw' => $orderData['GrandTotal'] ?? 'not set',
+            'RefundAmount_raw' => $refundAmountRaw ?? 'not set',
+        ]);
+
         return Order::create([
             'OrderID' => $orderData['OrderID'],
             'Agent' => $orderData['Agent'] ?? '',
             'Created' => $created,
             'OrderDate' => $orderDate,
             'OrderNum' => $orderData['OrderNum'] ?? '',
-            'ProductTotal' => $orderData['ProductTotal'] ?? 0,
-            'GrandTotal' => $orderData['GrandTotal'] ?? 0,
-            'RefundAmount' => $orderData['RefundAmount'] ?? 0,
+            'OrderN' => $orderData['OrderN'] ?? null,
+            'ProductTotal' => $productTotal,
+            'GrandTotal' => $grandTotal,
+            'RefundAmount' => $refundAmount,
+            'refund_amount_raw' => $refundAmountRaw !== null ? (string) $refundAmountRaw : null,
+            'refund_amount_is_valid' => $refundAmountIsValid,
             'Shipping' => $orderData['Shipping'] ?? null,
             'ShippingMethod' => $orderData['ShippingMethod'] ?? null,
-            'Refund' => (bool) ($orderData['Refund'] ?? false),
+            'Refund' => $refund,
+            'refund_type' => $refundType,
+            'is_refunded' => $isRefunded,
+            'is_partial_refund' => $isPartialRefund,
+            'is_marketplace' => $isMarketplace,
+            'has_missing_contact_info' => $hasMissingContactInfo,
             'customer_id' => $customer?->id,
             'BrandID' => $orderData['BrandID'] ?? null,
         ]);
@@ -277,33 +384,178 @@ final class OptimizedOrderImportService
         $orderDate = $this->parseOrderDate($orderData['OrderDate'] ?? null);
         $created = $this->parseDateTime($orderData['Created'] ?? null);
 
+        // Determine if this is a marketplace/FBA order
+        $isMarketplace = $this->isMarketplaceOrder($orderData);
+
+        // Determine if contact info is missing
+        $hasMissingContactInfo = $this->hasMissingContactInfo($orderData);
+
+        $productTotal = $this->normalizeDecimal($orderData['ProductTotal'] ?? 0);
+        $grandTotal = $this->normalizeDecimal($orderData['GrandTotal'] ?? 0);
+
+        // Store original RefundAmount before normalization
+        $refundAmountRaw = $orderData['RefundAmount'] ?? null;
+        $refundAmount = $this->normalizeDecimal($refundAmountRaw ?? 0);
+
+        // Validate RefundAmount
+        $refundAmountIsValid = $this->isValidRefundAmount($refundAmountRaw);
+
+        // Store original Refund type (can be string like "*Cancelled", "*Refund", etc.)
+        $refundType = is_string($orderData['Refund'] ?? null) ? $orderData['Refund'] : null;
+        $refund = (bool) ($orderData['Refund'] ?? false);
+
+        // Calculate refund flags
+        $isRefunded = (float) $refundAmount > 0;
+        $isPartialRefund = $isRefunded && (float) $refundAmount < (float) $grandTotal && (float) $grandTotal > 0;
+
         $fields = [
             'Agent' => $orderData['Agent'] ?? '',
             'Created' => $created,
             'OrderDate' => $orderDate,
             'OrderNum' => $orderData['OrderNum'] ?? '',
-            'ProductTotal' => $orderData['ProductTotal'] ?? 0,
-            'GrandTotal' => $orderData['GrandTotal'] ?? 0,
-            'RefundAmount' => $orderData['RefundAmount'] ?? 0,
+            'OrderN' => $orderData['OrderN'] ?? null,
+            'ProductTotal' => $productTotal,
+            'GrandTotal' => $grandTotal,
+            'RefundAmount' => $refundAmount,
+            'refund_amount_raw' => $refundAmountRaw !== null ? (string) $refundAmountRaw : null,
+            'refund_amount_is_valid' => $refundAmountIsValid,
             'Shipping' => $orderData['Shipping'] ?? null,
             'ShippingMethod' => $orderData['ShippingMethod'] ?? null,
-            'Refund' => (bool) ($orderData['Refund'] ?? false),
+            'Refund' => $refund,
+            'refund_type' => $refundType,
+            'is_refunded' => $isRefunded,
+            'is_partial_refund' => $isPartialRefund,
+            'is_marketplace' => $isMarketplace,
+            'has_missing_contact_info' => $hasMissingContactInfo,
             'customer_id' => $customer?->id,
             'BrandID' => $orderData['BrandID'] ?? null,
         ];
 
         foreach ($fields as $field => $value) {
-            if ($value != $order->$field) {
-                $order->$field = $value;
-                $changed = true;
+            try {
+                // Compare normalized decimal values properly
+                if ($field === 'ProductTotal' || $field === 'GrandTotal' || $field === 'RefundAmount') {
+                    $currentValue = is_numeric($order->getRawOriginal($field)) ? (float) $order->getRawOriginal($field) : 0.0;
+                    $newValue = is_numeric($value) ? (float) $value : 0.0;
+                    if (abs($newValue - $currentValue) > 0.01) {
+                        // Use setAttribute to bypass cast temporarily, then set the raw value
+                        $order->setRawAttributes(array_merge($order->getAttributes(), [$field => $newValue]), true);
+                        $changed = true;
+                    }
+                } elseif ($field === 'is_refunded' || $field === 'is_partial_refund') {
+                    // Boolean fields - compare strictly
+                    if ((bool) $value !== (bool) $order->$field) {
+                        $order->$field = (bool) $value;
+                        $changed = true;
+                    }
+                } elseif ($value != $order->$field) {
+                    $order->$field = $value;
+                    $changed = true;
+                }
+            } catch (\Exception $e) {
+                Log::error('Error updating order field', [
+                    'OrderID' => $order->OrderID,
+                    'field' => $field,
+                    'value' => $value,
+                    'value_type' => gettype($value),
+                    'error' => $e->getMessage(),
+                ]);
+                throw $e;
             }
         }
 
         if ($changed) {
-            $order->save();
+            try {
+                // Use query builder to update decimal fields to avoid casting issues
+                $updateData = [];
+                foreach ($fields as $field => $value) {
+                    if ($field === 'ProductTotal' || $field === 'GrandTotal' || $field === 'RefundAmount') {
+                        $updateData[$field] = is_numeric($value) ? (float) $value : 0.0;
+                    } else {
+                        $updateData[$field] = $value;
+                    }
+                }
+
+                \Illuminate\Support\Facades\DB::table('orders')
+                    ->where('id', $order->id)
+                    ->update($updateData);
+
+                // Refresh the model
+                $order->refresh();
+            } catch (\Exception $e) {
+                Log::error('Error saving order', [
+                    'OrderID' => $order->OrderID,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                throw $e;
+            }
         }
 
         return $changed;
+    }
+
+    /**
+     * Determine if order is from marketplace/FBA.
+     *
+     * @param  array<string, mixed>  $orderData
+     */
+    private function isMarketplaceOrder(array $orderData): bool
+    {
+        $email = trim((string) ($orderData['Email'] ?? ''));
+        $name = trim((string) ($orderData['Name'] ?? ''));
+        $phone = trim((string) ($orderData['Phone'] ?? ''));
+
+        // Marketplace/FBA orders typically have no email, name, or phone
+        // Or have specific patterns (e.g., Amazon FBA)
+        if (empty($email) && empty($name) && empty($phone)) {
+            return true;
+        }
+
+        // Check for common marketplace indicators
+        $agent = strtolower(trim((string) ($orderData['Agent'] ?? '')));
+        if (str_contains($agent, 'amazon') || str_contains($agent, 'fba') || str_contains($agent, 'marketplace')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine if order has missing contact information.
+     *
+     * @param  array<string, mixed>  $orderData
+     */
+    private function hasMissingContactInfo(array $orderData): bool
+    {
+        $email = trim((string) ($orderData['Email'] ?? ''));
+        $name = trim((string) ($orderData['Name'] ?? ''));
+        $phone = trim((string) ($orderData['Phone'] ?? ''));
+
+        return empty($email) || empty($name) || empty($phone);
+    }
+
+    /**
+     * Validate RefundAmount value.
+     * Returns true if value is numeric or can be parsed as decimal.
+     */
+    private function isValidRefundAmount(mixed $value): bool
+    {
+        if ($value === null || $value === '') {
+            return true; // Empty/null is valid (means no refund)
+        }
+
+        if (is_numeric($value)) {
+            return true;
+        }
+
+        // Try to clean and parse string values like "99.80+102." or "sent retur"
+        $cleaned = preg_replace('/[^0-9.-]/', '', (string) $value);
+        if ($cleaned !== '' && is_numeric($cleaned)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -335,7 +587,18 @@ final class OptimizedOrderImportService
     private function parseDateTime(mixed $datetime): ?Carbon
     {
         if ($datetime === null) {
-            return null;
+            return Carbon::now();
+        }
+
+        // Handle Unix timestamp (numeric string or integer)
+        if (is_numeric($datetime)) {
+            try {
+                return Carbon::createFromTimestamp((int) $datetime);
+            } catch (\Exception $e) {
+                Log::warning('Failed to parse Created datetime as timestamp', ['datetime' => $datetime]);
+
+                return Carbon::now();
+            }
         }
 
         try {
@@ -343,7 +606,7 @@ final class OptimizedOrderImportService
         } catch (\Exception $e) {
             Log::warning('Failed to parse Created datetime', ['datetime' => $datetime]);
 
-            return null;
+            return Carbon::now();
         }
     }
 
@@ -369,5 +632,28 @@ final class OptimizedOrderImportService
     {
         $syncState = SyncState::getOrCreateFor('orders');
         $syncState->updateOrderSync($orderDate->format('Y-m-d'), $orderId);
+    }
+
+    /**
+     * Normalize decimal value for database storage.
+     * Returns string to avoid casting issues with Eloquent decimal fields.
+     */
+    private function normalizeDecimal(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '0.00';
+        }
+
+        if (is_numeric($value)) {
+            return number_format((float) $value, 2, '.', '');
+        }
+
+        // Try to extract numeric value from string
+        $cleaned = preg_replace('/[^0-9.-]/', '', (string) $value);
+        if ($cleaned !== '' && is_numeric($cleaned)) {
+            return number_format((float) $cleaned, 2, '.', '');
+        }
+
+        return '0.00';
     }
 }

@@ -130,18 +130,47 @@ final class OrderImportService
         $orderDate = $this->parseOrderDate($orderData['OrderDate'] ?? null);
         $created = $this->parseDateTime($orderData['Created'] ?? null);
 
+        // Determine if this is a marketplace/FBA order
+        $isMarketplace = $this->isMarketplaceOrder($orderData);
+
+        // Determine if contact info is missing
+        $hasMissingContactInfo = $this->hasMissingContactInfo($orderData);
+
+        // Store original RefundAmount before normalization
+        $refundAmountRaw = $orderData['RefundAmount'] ?? null;
+        $refundAmount = $this->normalizeDecimal($refundAmountRaw ?? 0);
+
+        // Validate RefundAmount
+        $refundAmountIsValid = $this->isValidRefundAmount($refundAmountRaw);
+
+        // Store original Refund type (can be string like "*Cancelled", "*Refund", etc.)
+        $refundType = is_string($orderData['Refund'] ?? null) ? $orderData['Refund'] : null;
+        $refund = (bool) ($orderData['Refund'] ?? false);
+
+        // Calculate refund flags
+        $isRefunded = (float) $refundAmount > 0;
+        $isPartialRefund = $isRefunded && (float) $refundAmount < (float) ($orderData['GrandTotal'] ?? 0) && (float) ($orderData['GrandTotal'] ?? 0) > 0;
+
         return Order::create([
             'OrderID' => $orderData['OrderID'],
             'Agent' => $orderData['Agent'] ?? '',
             'Created' => $created,
             'OrderDate' => $orderDate,
             'OrderNum' => $orderData['OrderNum'] ?? '',
+            'OrderN' => $orderData['OrderN'] ?? null,
             'ProductTotal' => $orderData['ProductTotal'] ?? 0,
             'GrandTotal' => $orderData['GrandTotal'] ?? 0,
-            'RefundAmount' => $orderData['RefundAmount'] ?? 0,
+            'RefundAmount' => $refundAmount,
+            'refund_amount_raw' => $refundAmountRaw !== null ? (string) $refundAmountRaw : null,
+            'refund_amount_is_valid' => $refundAmountIsValid,
             'Shipping' => $orderData['Shipping'] ?? null,
             'ShippingMethod' => $orderData['ShippingMethod'] ?? null,
-            'Refund' => (bool) ($orderData['Refund'] ?? false),
+            'Refund' => $refund,
+            'refund_type' => $refundType,
+            'is_refunded' => $isRefunded,
+            'is_partial_refund' => $isPartialRefund,
+            'is_marketplace' => $isMarketplace,
+            'has_missing_contact_info' => $hasMissingContactInfo,
             'customer_id' => $customer?->id,
             'BrandID' => $orderData['BrandID'] ?? null,
         ]);
@@ -159,23 +188,58 @@ final class OrderImportService
         $orderDate = $this->parseOrderDate($orderData['OrderDate'] ?? null);
         $created = $this->parseDateTime($orderData['Created'] ?? null);
 
+        // Determine if this is a marketplace/FBA order
+        $isMarketplace = $this->isMarketplaceOrder($orderData);
+
+        // Determine if contact info is missing
+        $hasMissingContactInfo = $this->hasMissingContactInfo($orderData);
+
+        // Store original RefundAmount before normalization
+        $refundAmountRaw = $orderData['RefundAmount'] ?? null;
+        $refundAmount = $this->normalizeDecimal($refundAmountRaw ?? 0);
+
+        // Validate RefundAmount
+        $refundAmountIsValid = $this->isValidRefundAmount($refundAmountRaw);
+
+        // Store original Refund type (can be string like "*Cancelled", "*Refund", etc.)
+        $refundType = is_string($orderData['Refund'] ?? null) ? $orderData['Refund'] : null;
+        $refund = (bool) ($orderData['Refund'] ?? false);
+
+        // Calculate refund flags
+        $isRefunded = (float) $refundAmount > 0;
+        $isPartialRefund = $isRefunded && (float) $refundAmount < (float) ($orderData['GrandTotal'] ?? 0) && (float) ($orderData['GrandTotal'] ?? 0) > 0;
+
         $fields = [
             'Agent' => $orderData['Agent'] ?? '',
             'Created' => $created,
             'OrderDate' => $orderDate,
             'OrderNum' => $orderData['OrderNum'] ?? '',
+            'OrderN' => $orderData['OrderN'] ?? null,
             'ProductTotal' => $orderData['ProductTotal'] ?? 0,
             'GrandTotal' => $orderData['GrandTotal'] ?? 0,
-            'RefundAmount' => $orderData['RefundAmount'] ?? 0,
+            'RefundAmount' => $refundAmount,
+            'refund_amount_raw' => $refundAmountRaw !== null ? (string) $refundAmountRaw : null,
+            'refund_amount_is_valid' => $refundAmountIsValid,
             'Shipping' => $orderData['Shipping'] ?? null,
             'ShippingMethod' => $orderData['ShippingMethod'] ?? null,
-            'Refund' => (bool) ($orderData['Refund'] ?? false),
+            'Refund' => $refund,
+            'refund_type' => $refundType,
+            'is_refunded' => $isRefunded,
+            'is_partial_refund' => $isPartialRefund,
+            'is_marketplace' => $isMarketplace,
+            'has_missing_contact_info' => $hasMissingContactInfo,
             'customer_id' => $customer?->id,
             'BrandID' => $orderData['BrandID'] ?? null,
         ];
 
         foreach ($fields as $field => $value) {
-            if ($value != $order->$field) {
+            // Boolean fields - compare strictly
+            if ($field === 'is_refunded' || $field === 'is_partial_refund' || $field === 'refund_amount_is_valid') {
+                if ((bool) $value !== (bool) $order->$field) {
+                    $order->$field = (bool) $value;
+                    $changed = true;
+                }
+            } elseif ($value != $order->$field) {
                 $order->$field = $value;
                 $changed = true;
             }
@@ -186,6 +250,46 @@ final class OrderImportService
         }
 
         return $changed;
+    }
+
+    /**
+     * Determine if order is from marketplace/FBA.
+     *
+     * @param  array<string, mixed>  $orderData
+     */
+    private function isMarketplaceOrder(array $orderData): bool
+    {
+        $email = trim((string) ($orderData['Email'] ?? ''));
+        $name = trim((string) ($orderData['Name'] ?? ''));
+        $phone = trim((string) ($orderData['Phone'] ?? ''));
+
+        // Marketplace/FBA orders typically have no email, name, or phone
+        // Or have specific patterns (e.g., Amazon FBA)
+        if (empty($email) && empty($name) && empty($phone)) {
+            return true;
+        }
+
+        // Check for common marketplace indicators
+        $agent = strtolower(trim((string) ($orderData['Agent'] ?? '')));
+        if (str_contains($agent, 'amazon') || str_contains($agent, 'fba') || str_contains($agent, 'marketplace')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine if order has missing contact information.
+     *
+     * @param  array<string, mixed>  $orderData
+     */
+    private function hasMissingContactInfo(array $orderData): bool
+    {
+        $email = trim((string) ($orderData['Email'] ?? ''));
+        $name = trim((string) ($orderData['Name'] ?? ''));
+        $phone = trim((string) ($orderData['Phone'] ?? ''));
+
+        return empty($email) || empty($name) || empty($phone);
     }
 
     /**
@@ -219,7 +323,18 @@ final class OrderImportService
     private function parseDateTime(mixed $datetime): ?Carbon
     {
         if ($datetime === null) {
-            return null;
+            return Carbon::now();
+        }
+
+        // Handle Unix timestamp (numeric string or integer)
+        if (is_numeric($datetime)) {
+            try {
+                return Carbon::createFromTimestamp((int) $datetime);
+            } catch (\Exception $e) {
+                Log::warning('Failed to parse Created datetime as timestamp', ['datetime' => $datetime]);
+
+                return Carbon::now();
+            }
         }
 
         try {
@@ -227,7 +342,49 @@ final class OrderImportService
         } catch (\Exception $e) {
             Log::warning('Failed to parse Created datetime', ['datetime' => $datetime]);
 
-            return null;
+            return Carbon::now();
         }
+    }
+
+    /**
+     * Normalize decimal value to string format.
+     */
+    private function normalizeDecimal(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '0.00';
+        }
+        if (is_numeric($value)) {
+            return number_format((float) $value, 2, '.', '');
+        }
+        $cleaned = preg_replace('/[^0-9.-]/', '', (string) $value);
+        if ($cleaned !== '' && is_numeric($cleaned)) {
+            return number_format((float) $cleaned, 2, '.', '');
+        }
+
+        return '0.00';
+    }
+
+    /**
+     * Validate RefundAmount value.
+     * Returns true if value is numeric or can be parsed as decimal.
+     */
+    private function isValidRefundAmount(mixed $value): bool
+    {
+        if ($value === null || $value === '') {
+            return true; // Empty/null is valid (means no refund)
+        }
+
+        if (is_numeric($value)) {
+            return true;
+        }
+
+        // Try to clean and parse string values like "99.80+102." or "sent retur"
+        $cleaned = preg_replace('/[^0-9.-]/', '', (string) $value);
+        if ($cleaned !== '' && is_numeric($cleaned)) {
+            return true;
+        }
+
+        return false;
     }
 }

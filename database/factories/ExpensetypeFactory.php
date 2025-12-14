@@ -17,7 +17,8 @@ class ExpensetypeFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'Name' => fake()->words(2, true),
+            'Visible' => true,
         ];
     }
 }

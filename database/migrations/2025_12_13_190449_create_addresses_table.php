@@ -28,6 +28,11 @@ return new class extends Migration
             $table->foreignId('customer_id')->nullable()->constrained('customers')->onDelete('set null')->onUpdate('cascade');
             $table->softDeletes();
             $table->timestamps();
+
+            // Indexes and constraints
+            $table->index('address_hash');
+            $table->index('customer_id');
+            $table->unique(['address_hash', 'customer_id'], 'addresses_hash_customer_unique');
         });
 
         Schema::create('address_order', function (Blueprint $table): void {

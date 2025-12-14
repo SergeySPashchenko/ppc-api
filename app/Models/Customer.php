@@ -52,6 +52,7 @@ final class Customer extends Model
         'email',
         'name',
         'phone',
+        'is_anonymous',
     ];
 
     /**

@@ -17,7 +17,19 @@ class ProductItemFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'ProductID' => null,
+            'ProductName' => fake()->words(3, true),
+            'SKU' => fake()->unique()->bothify('SKU-####-???'),
+            'Quantity' => fake()->numberBetween(0, 100),
+            'upSell' => false,
+            'active' => true,
+            'deleted' => false,
+            'offerProducts' => null,
+            'extraProduct' => false,
+            'is_valid' => true,
+            'is_available' => true,
+            'is_discount_item' => false,
+            'is_bundle' => false,
         ];
     }
 }

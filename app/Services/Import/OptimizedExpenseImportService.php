@@ -134,6 +134,7 @@ final class OptimizedExpenseImportService
 
     /**
      * Import last N expenses.
+     * Optimized for large datasets by processing in chunks.
      *
      * @return array{created: int, updated: int, skipped: int, errors: int}
      */
@@ -143,19 +144,40 @@ final class OptimizedExpenseImportService
         $repository = app(OptimizedExternalRepository::class);
         $expenses = $repository->getLastExpenses($limit);
 
-        foreach ($expenses as $expenseData) {
-            try {
-                // Don't wrap in transaction - sync services handle their own transactions
-                // This allows ExpenseType/Product to be committed before Expense creation
-                $result = $this->importSingleExpense($expenseData);
-                $stats[$result]++;
-            } catch (\Exception $e) {
-                $stats['errors']++;
-                Log::error('Failed to import expense', [
-                    'id' => $expenseData['id'] ?? null,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
+        // Process in chunks to reduce memory usage and database load
+        $chunkSize = 50;
+        $processed = 0;
+
+        foreach (array_chunk($expenses, $chunkSize) as $chunk) {
+            foreach ($chunk as $expenseData) {
+                try {
+                    // Don't wrap in transaction - sync services handle their own transactions
+                    // This allows ExpenseType/Product to be committed before Expense creation
+                    $result = $this->importSingleExpense($expenseData);
+                    $stats[$result]++;
+                    $processed++;
+
+                    // Log progress every 50 records
+                    if ($processed % 50 === 0) {
+                        Log::info('Expense import progress', [
+                            'processed' => $processed,
+                            'total' => $limit,
+                            'stats' => $stats,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    $stats['errors']++;
+                    Log::error('Failed to import expense', [
+                        'id' => $expenseData['id'] ?? null,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                }
+            }
+
+            // Small delay between chunks to reduce database load
+            if (count($chunk) === $chunkSize) {
+                usleep(100000); // 0.1 second delay
             }
         }
 
@@ -240,26 +262,61 @@ final class OptimizedExpenseImportService
         $expenseDate = Carbon::parse($expenseData['ExpenseDate'])->startOfDay();
 
         return DB::transaction(function () use ($expenseDate, $expenseData, $productId, $expenseTypeId) {
-            $expense = Expense::query()
-                ->where('ExpenseDate', $expenseDate)
+            // Use DB query first to avoid Eloquent scope issues
+            // ExpenseDate is stored as date, so compare as date string
+            $expenseId = DB::table('expenses')
+                ->whereDate('ExpenseDate', $expenseDate->format('Y-m-d'))
                 ->where('ProductID', $productId)
                 ->where('ExpenseID', $expenseTypeId)
-                ->first();
+                ->value('id');
 
-            $isNew = $expense === null;
+            $isNew = $expenseId === null;
 
             if ($isNew) {
-                $expense = Expense::create([
-                    'ExpenseDate' => $expenseDate,
-                    'Expense' => $expenseData['Expense'] ?? 0,
-                    'ProductID' => $productId,
-                    'ExpenseID' => $expenseTypeId,
-                ]);
-                Log::info('Created new expense', [
-                    'expense_id' => $expense->id,
-                    'ExpenseDate' => $expenseDate->format('Y-m-d'),
-                ]);
-            } else {
+                try {
+                    $expense = Expense::create([
+                        'ExpenseDate' => $expenseDate,
+                        'Expense' => $expenseData['Expense'] ?? 0,
+                        'ProductID' => $productId,
+                        'ExpenseID' => $expenseTypeId,
+                    ]);
+                    Log::info('Created new expense', [
+                        'expense_id' => $expense->id,
+                        'ExpenseDate' => $expenseDate->format('Y-m-d'),
+                    ]);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    // If expense was created concurrently, try to find it
+                    if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'UNIQUE constraint')) {
+                        $expenseId = DB::table('expenses')
+                            ->whereDate('ExpenseDate', $expenseDate->format('Y-m-d'))
+                            ->where('ProductID', $productId)
+                            ->where('ExpenseID', $expenseTypeId)
+                            ->value('id');
+                        if ($expenseId !== null) {
+                            $expense = Expense::withoutGlobalScopes()->find($expenseId);
+                            $isNew = false;
+                        } else {
+                            throw $e;
+                        }
+                    } else {
+                        throw $e;
+                    }
+                }
+            }
+
+            if (! $isNew) {
+                if (! isset($expense)) {
+                    $expense = Expense::withoutGlobalScopes()->find($expenseId);
+                }
+                if ($expense === null) {
+                    Log::error('Expense not found after ID lookup', [
+                        'ExpenseDate' => $expenseDate->format('Y-m-d'),
+                        'ProductID' => $productId,
+                        'ExpenseID' => $expenseTypeId,
+                        'expense_id' => $expenseId,
+                    ]);
+                    throw new \RuntimeException('Expense not found');
+                }
                 $updated = $this->updateExpenseIfChanged($expense, $expenseData, $expenseDate);
                 if (! $updated) {
                     return 'skipped';

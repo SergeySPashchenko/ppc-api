@@ -32,6 +32,11 @@ final class OrderItem extends Model
         'idOrderItem',
         'Price',
         'Qty',
+        'line_total',
+        'is_valid',
+        'price_raw',
+        'qty_raw',
+        'validation_errors',
         'OrderID',
         'ItemID',
     ];
@@ -65,6 +70,10 @@ final class OrderItem extends Model
         return [
             'Price' => 'decimal:2',
             'Qty' => 'integer',
+            'line_total' => 'decimal:2',
+            'is_valid' => 'boolean',
+            'price_raw' => 'decimal:2',
+            'qty_raw' => 'integer',
         ];
     }
 }

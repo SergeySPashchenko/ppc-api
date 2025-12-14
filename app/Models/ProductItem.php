@@ -39,12 +39,19 @@ final class ProductItem extends Model
         'ProductName',
         'slug',
         'SKU',
+        'sku_normalized',
         'Quantity',
+        'quantity_raw',
         'upSell',
         'extraProduct',
         'offerProducts',
         'active',
         'deleted',
+        'is_valid',
+        'is_available',
+        'is_discount_item',
+        'is_bundle',
+        'validation_errors',
     ];
 
     public function getSlugOptions(): SlugOptions
@@ -89,6 +96,11 @@ final class ProductItem extends Model
             'extraProduct' => 'boolean',
             'active' => 'boolean',
             'deleted' => 'boolean',
+            'is_valid' => 'boolean',
+            'is_available' => 'boolean',
+            'is_discount_item' => 'boolean',
+            'is_bundle' => 'boolean',
+            'quantity_raw' => 'integer',
         ];
     }
 }

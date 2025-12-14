@@ -41,6 +41,23 @@ final class ProductSyncService
         $brandName = $externalData['Brand'] ?? null;
         $brand = $this->brandService->syncBrand($brandName);
 
+        // Get or create default brand if needed (for NOT NULL constraint)
+        if ($brand === null) {
+            $defaultBrand = Brand::query()->where('brand_name', 'Default')->first();
+            if ($defaultBrand === null) {
+                try {
+                    $defaultBrand = Brand::create([
+                        'brand_name' => 'Default',
+                    ]);
+                    Log::info('Created default brand for product import', ['brand_id' => $defaultBrand->brand_id]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to create default brand', ['error' => $e->getMessage()]);
+                    throw $e;
+                }
+            }
+            $brand = $defaultBrand;
+        }
+
         if ($product === null) {
             // Create new product
             $productName = $externalData['Product'] ?? "Product {$productId}";
@@ -83,25 +100,38 @@ final class ProductSyncService
                 'main_category_id' => $externalData['main_category_id'] ?? $defaultCategoryId,
                 'marketing_category_id' => $externalData['marketing_category_id'] ?? $defaultCategoryId,
                 'gender_id' => $externalData['gender_id'] ?? $defaultGenderId,
-                'brand_id' => $brand?->brand_id,
+                'brand_id' => $brand->brand_id,
             ]);
             Log::info('Created new product', ['ProductID' => $productId, 'Product' => $productName]);
         } else {
             // Check if product data changed
             $changed = false;
+            $productName = $externalData['Product'] ?? null;
+
+            // Update Product name separately (only if provided and different)
+            if ($productName !== null && $productName !== $product->Product) {
+                $product->Product = $productName;
+                $changed = true;
+            }
+
+            // Update brand_id if changed
+            if ($brand->brand_id !== $product->brand_id) {
+                $product->brand_id = $brand->brand_id;
+                $changed = true;
+            }
+
+            // Update other fields only if explicitly provided
             $fields = [
-                'Product' => $externalData['Product'] ?? null,
-                'newSystem' => $externalData['newSystem'] ?? false,
-                'Visible' => $externalData['Visible'] ?? false,
+                'newSystem' => $externalData['newSystem'] ?? null,
+                'Visible' => $externalData['Visible'] ?? null,
                 'flyer' => $externalData['flyer'] ?? null,
                 'main_category_id' => $externalData['main_category_id'] ?? null,
                 'marketing_category_id' => $externalData['marketing_category_id'] ?? null,
                 'gender_id' => $externalData['gender_id'] ?? null,
-                'brand_id' => $brand?->brand_id,
             ];
 
             foreach ($fields as $field => $value) {
-                if ($value != $product->$field) {
+                if ($value !== null && $value != $product->$field) {
                     $product->$field = $value;
                     $changed = true;
                 }

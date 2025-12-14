@@ -26,7 +26,7 @@ final class CustomerImportService
 
         // Amazon FBA / marketplace orders without email
         if (empty($email)) {
-            return $this->handleAnonymousCustomer($orderData, $name, $phone);
+            return $this->handleAnonymousCustomer($orderData, $name, $phone, true);
         }
 
         // Find or create customer by email
@@ -88,7 +88,7 @@ final class CustomerImportService
      *
      * @param  array<string, mixed>  $orderData
      */
-    private function handleAnonymousCustomer(array $orderData, ?string $name, ?string $phone): ?Customer
+    private function handleAnonymousCustomer(array $orderData, ?string $name, ?string $phone, bool $isAnonymous = false): ?Customer
     {
         // For anonymous orders, we still need a customer record
         // Use a special email format or create without email
@@ -97,6 +97,7 @@ final class CustomerImportService
             ->whereNull('email')
             ->where('name', $name ?? 'Anonymous')
             ->where('phone', $phone)
+            ->where('is_anonymous', $isAnonymous)
             ->first();
 
         if ($customer === null) {
@@ -104,6 +105,7 @@ final class CustomerImportService
                 'email' => null,
                 'name' => $name ?? 'Anonymous Customer',
                 'phone' => $phone,
+                'is_anonymous' => $isAnonymous,
             ]);
             Log::info('Created anonymous customer', ['customer_id' => $customer->id]);
         } else {
